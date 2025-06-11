@@ -8,13 +8,13 @@ const firebaseConfig = {
   projectId: 'listafacilapp-a0949',
   storageBucket: 'listafacilapp-a0949.appspot.com',
   messagingSenderId: '884364349083',
-  appId: '1:884364349083:web:d0d7e8fe8152b17ce3003e'
+  appId: '1:884364349083:web:d0d7e8fe8152b17ce3003e',
 };
 
 let app;
 let auth;
 
-if (getApps().length === 0) {
+if (!getApps().length) {
   app = initializeApp(firebaseConfig);
   auth = initializeAuth(app, {
     persistence: getReactNativePersistence(AsyncStorage),
