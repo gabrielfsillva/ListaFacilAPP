@@ -1,323 +1,439 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from "react"; 
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  ReactNode,
+} from "react";
 import { themes } from "../global/themes";
 import { Flag } from "../components/Flag";
 import { Input } from "../components/Input";
-import { Modalize } from 'react-native-modalize';
-import { MaterialIcons, AntDesign } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Modalize } from "react-native-modalize";
+import { MaterialIcons, AntDesign } from "@expo/vector-icons";
 import CustomDateTimePicker from "../components/CustomDateTimePicker";
-import { TouchableOpacity, Text, View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import {
+  TouchableOpacity,
+  Text,
+  View,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from "react-native";
 import { Loading } from "../components/Loading";
+import {
+  collection,
+  addDoc,
+  getDocs,
+  updateDoc,
+  deleteDoc,
+  doc,
+  query,
+  where,
+  getFirestore,
+} from "firebase/firestore";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { app } from "../services/firebaseConfig.js"; 
 
+const db = getFirestore(app);
 
-export const AuthContextList:any= createContext({});
+export interface Task {
+  userId: string;
+  item: number; 
+  title: string;
+  description: string;
+  flag: string;
+  timeLimit: string; 
+}
+
+interface AuthContextType {
+  onOpen: () => void;
+  taskList: Task[];
+  handleEdit: (item: Task) => void;
+  handleDelete: (item: Task) => void;
+  taskListBackup: Task[];
+  filter: (t: string) => void;
+}
+
+export const AuthContextList = createContext<AuthContextType | undefined>(
+  undefined
+);
 
 const flags = [
-    { caption: 'urgente', color: themes.Colors.red },
-    { caption: 'opcional', color: themes.Colors.blueLigth }
+  { caption: "urgente", color: themes.Colors.red },
+  { caption: "opcional", color: themes.Colors.blueLigth },
 ];
 
-export const AuthProviderList: React.FC<React.PropsWithChildren<{}>> = (props) => {
-    const modalizeRef = useRef<Modalize>(null);
-    const [title, setTitle] = useState('');
-    const [description, setDescription] = useState('');
-    const [selectedFlag, setSelectedFlag] = useState('urgente');
-    const [selectedDate, setSelectedDate] = useState(new Date());
-    const [selectedTime, setSelectedTime] = useState(new Date());
-    const [showDatePicker, setShowDatePicker] = useState(false);
-    const [showTimePicker, setShowTimePicker] = useState(false);
-    const [taskList, setTaskList] = useState([]);
-    const [taskListBackup,setTaskListBackup]= useState([]);
-    const [item,setItem] = useState(0);
-    const [loading,setLoading]= useState(false)
+interface AuthProviderListProps {
+  children: ReactNode;
+}
 
-    const onOpen = () => {
-        modalizeRef.current?.open();
-    };
+export const AuthProviderList = ({ children }: AuthProviderListProps) => {
+  const modalizeRef = useRef<Modalize>(null);
 
-    const onClose = () => {
-        modalizeRef.current?.close();
-    };
+  // Form state
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [selectedFlag, setSelectedFlag] = useState("urgente");
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedTime, setSelectedTime] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
-    useEffect(() => {
-        get_taskList();
-    }, []);
+  // Task state
+  const [taskList, setTaskList] = useState<Task[]>([]);
+  const [taskListBackup, setTaskListBackup] = useState<Task[]>([]);
 
-    const handleDateChange = (date: Date) => {
-        setSelectedDate(date);
-    };
+  const [item, setItem] = useState<number>(0); // id da tarefa (timestamp)
+  const [loading, setLoading] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
 
-    const handleTimeChange = (date: Date) => {
-        setSelectedTime(date)
-    };
-    const handleSave = async () => {
-        const newItem = {
-            item: item !== 0 ? item : Date.now(),
-            title,
-            description,
-            flag: selectedFlag,
-            timeLimit: new Date(
-                selectedDate.getFullYear(),
-                selectedDate.getMonth(),
-                selectedDate.getDate(),
-                selectedTime.getHours(),
-                selectedTime.getMinutes()
-            ).toISOString()
-        };
-        onClose();
-    
-        try {
-            setLoading(true)
-            const storedData = await AsyncStorage.getItem('taskList');
-            let taskList = storedData ? JSON.parse(storedData) : [];
-    
-            // Verifica se o item já existe no array
-            const itemIndex = taskList.findIndex((task: any) => task.item === newItem.item);
-    
-            if (itemIndex >= 0) {
-                // Substitui o item existente pelo novo
-                taskList[itemIndex] = newItem;
-            } else {
-                // Adiciona o novo item ao array
-                taskList.push(newItem);
-            }
-    
-            await AsyncStorage.setItem('taskList', JSON.stringify(taskList));
-            setTaskList(taskList);
-            setTaskListBackup(taskList)
-            setData()
-            
-        } catch (error) {
-            console.error("Erro ao salvar o item:", error);
-            onOpen()
-        }finally{
-            setLoading(false)
-        }
-    };
-    
-    const filter = (t: string) => {
-        if (taskList.length == 0) return;
-        const array = taskListBackup;
-        const campos = ['title', 'description'];
-        if (t) {
-            const searchTerm = t.trim().toLowerCase();
+  // Busca tarefas do usuário no Firestore
+  const get_taskList = async (uid: string) => {
+    try {
+      setLoading(true);
+      const q = query(collection(db, "tasks"), where("userId", "==", uid));
+      const querySnapshot = await getDocs(q);
+      const list = querySnapshot.docs.map((doc) => doc.data() as Task);
+      setTaskList(list);
+      setTaskListBackup(list);
+    } catch (error) {
+      console.error("Erro ao buscar tarefas:", error);
+      alert("Erro ao buscar tarefas. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-            const filteredArr = array.filter((item: any) => {
-                for (let i = 0; i < campos.length; i++) {
-                    const value = item[campos[i].trim()];
-                    if (typeof value === 'string' && value.trim().toLowerCase().includes(searchTerm))
-                        return true;
-                }
-            });
+  useEffect(() => {
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUserId(user.uid);
+        get_taskList(user.uid);
+      } else {
+        setUserId(null);
+        setTaskList([]);
+        setTaskListBackup([]);
+      }
+    });
+    return unsubscribe;
+  }, []);
 
-            setTaskList(filteredArr);
-        } else {
-            setTaskList(array);
-        }
+  // Abre modal de tarefa
+  const onOpen = () => modalizeRef.current?.open();
+  // Fecha modal
+  const onClose = () => modalizeRef.current?.close();
+
+  // Atualiza data e hora selecionadas
+  const handleDateChange = (date: Date) => setSelectedDate(date);
+  const handleTimeChange = (date: Date) => setSelectedTime(date);
+
+  // Salva ou atualiza a tarefa no Firestore
+  const handleSave = async () => {
+    if (!userId) return;
+
+    if (!title.trim()) {
+      alert("O título é obrigatório.");
+      return;
     }
 
-    type PropCard = {
-        item: number;
-        title: string;
-        description: string;
-        flag: string;
-        timeLimit: string;
+    const newItem: Task = {
+      userId,
+      item: item !== 0 ? item : Date.now(),
+      title: title.trim(),
+      description: description.trim(),
+      flag: selectedFlag,
+      timeLimit: new Date(
+        selectedDate.getFullYear(),
+        selectedDate.getMonth(),
+        selectedDate.getDate(),
+        selectedTime.getHours(),
+        selectedTime.getMinutes()
+      ).toISOString(),
     };
 
-    const handleEdit = async (itemToEdit:PropCard) => {
-        setTitle(itemToEdit.title);
-        setDescription(itemToEdit.description);
-        setSelectedFlag(itemToEdit.flag);
-        setItem(itemToEdit.item)
-        
-        const timeLimit = new Date(itemToEdit.timeLimit);
-        setSelectedDate(timeLimit);
-        setSelectedTime(timeLimit);
-        
-        onOpen(); 
-    };
-    
-    const handleDelete = async (itemToDelete: PropCard) => {
-        try {
-            setLoading(true)
-            const storedData = await AsyncStorage.getItem('taskList');
-            const taskList = storedData ? JSON.parse(storedData) : [];
-            
-            const updatedTaskList = taskList.filter((item: any) => item.item !== itemToDelete.item);
-    
-            await AsyncStorage.setItem('taskList', JSON.stringify(updatedTaskList));
-            setTaskList(updatedTaskList);
-            setTaskListBackup(updatedTaskList)
-        } catch (error) {
-            console.error("Erro ao excluir o item:", error);
-        }finally{
-            setLoading(false)
-        }
-    };
-    
+    onClose();
 
-    async function get_taskList() {
-        try {
-            setLoading(true)
-            const storedData = await AsyncStorage.getItem('taskList');
-            const taskList = storedData ? JSON.parse(storedData) : [];
-            setTaskList(taskList);
-            setTaskListBackup(taskList)
-        } catch (error) {
-            console.log(error);
-        }finally{
-            setLoading(false)
-        }
+    try {
+      setLoading(true);
+      // Procura se tarefa já existe (editar)
+      const itemQuery = query(
+        collection(db, "tasks"),
+        where("userId", "==", userId),
+        where("item", "==", newItem.item)
+      );
+      const snapshot = await getDocs(itemQuery);
+
+      if (!snapshot.empty) {
+        // Atualiza tarefa existente
+        const docRef = snapshot.docs[0].ref;
+        await updateDoc(docRef, {
+          userId: newItem.userId,
+          item: newItem.item,
+          title: newItem.title,
+          description: newItem.description,
+          flag: newItem.flag,
+          timeLimit: newItem.timeLimit,
+        });
+      } else {
+        // Adiciona nova tarefa
+        await addDoc(collection(db, "tasks"), newItem);
+      }
+
+      await get_taskList(userId);
+      resetForm();
+    } catch (error) {
+      console.error("Erro ao salvar no Firestore:", error);
+      alert("Erro ao salvar tarefa. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filtra tarefas por texto nos campos title ou description
+  const filter = (t: string) => {
+    if (taskListBackup.length === 0) return;
+
+    if (t.trim() === "") {
+      setTaskList(taskListBackup);
+      return;
     }
 
-    const _renderFlags = () => {
-        return flags.map((item, index) => (
-            <TouchableOpacity key={index} onPress={() => {
-                setSelectedFlag(item.caption)
-            }}>
-                <Flag 
-                    caption={item.caption}
-                    color={item.color} 
-                    selected={item.caption == selectedFlag}
-                />
-            </TouchableOpacity>
-        ));
-    };
+    const searchTerm = t.trim().toLowerCase();
 
-    const setData = ()=>{
-        setTitle('');
-        setDescription('');
-        setSelectedFlag('urgente');
-        setItem(0)
-        setSelectedDate(new Date());
-        setSelectedTime(new Date());
-    }
-
-    const _container = () => {
+    const filteredArr = taskListBackup.filter((item) =>
+      ["title", "description"].some((field) => {
+        const value = (item as any)[field];
         return (
-            <KeyboardAvoidingView 
-                style={styles.container}
-                behavior={Platform.OS === "ios" ? "padding" : "height"}
-                keyboardVerticalOffset={Platform.OS === "ios" ? 40 : 0}
-            >
-                <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-                    <View style={styles.header}>
-                        <TouchableOpacity onPress={() => onClose()}>
-                            <MaterialIcons name="close" size={30} />
-                        </TouchableOpacity>
-                        <Text style={styles.title}>{item != 0?'Editar tarefa':'Criar tarefa'}</Text>
-                        <TouchableOpacity onPress={handleSave}>
-                            <AntDesign name="check" size={30} />
-                        </TouchableOpacity>
-                    </View>
-                    <View style={styles.content}>
-                        <Input 
-                            Title="Título:" 
-                            labelStyle={styles.label} 
-                            value={title}
-                            onChangeText={setTitle}
-                        />
-                        <Input 
-                            Title="Descrição:" 
-                            numberOfLines={5} 
-                            height={100} 
-                            multiline 
-                            labelStyle={styles.label} 
-                            textAlignVertical="top"
-                            value={description}
-                            onChangeText={setDescription}
-                        />
-                        <View style={{ width: '100%', flexDirection: 'row', gap: 10 }}>
-                            <TouchableOpacity onPress={() => setShowDatePicker(true)}  style={{ width: 200,zIndex:999 }}>
-                                <Input 
-                                    Title="Data limite:" 
-                                    labelStyle={styles.label} 
-                                    editable={false}
-                                    value={selectedDate.toLocaleDateString()}
-                                    onPress={() => setShowDatePicker(true)} 
-                                />
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={() => setShowDatePicker(true)}   style={{ width: 100 }}>
-                                <Input 
-                                    Title="Hora limite:" 
-                                    labelStyle={styles.label} 
-                                    editable={false}
-                                    value={selectedTime.toLocaleTimeString()}
-                                    onPress={() => setShowTimePicker(true)}
-                                />
-                            </TouchableOpacity>
-                        </View>
-
-                            <CustomDateTimePicker 
-                                type='date' 
-                                onDateChange={handleDateChange} 
-                                show={showDatePicker} 
-                                setShow={setShowDatePicker} 
-                            />
-                            <CustomDateTimePicker 
-                                type='time' // Mude para 'time' aqui
-                                onDateChange={handleTimeChange} 
-                                show={showTimePicker} // Use showTimePicker aqui
-                                setShow={setShowTimePicker} // Use setShowTimePicker aqui
-                            />
-
-                        <View style={styles.containerFlag}>
-                            <Text style={styles.flag}>Flags:</Text>
-                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                                {_renderFlags()}
-                            </View>
-                        </View>
-                    </View>
-                </ScrollView>
-            </KeyboardAvoidingView>
+          typeof value === "string" && value.toLowerCase().includes(searchTerm)
         );
-    };
-
-    return (
-        <AuthContextList.Provider value={{ onOpen, taskList,handleEdit,handleDelete,taskListBackup,filter}}>
-            <Loading loading={loading}/>
-            {props.children}
-            <Modalize ref={modalizeRef} childrenStyle={{ height: 600 }} adjustToContentHeight={true}>
-                {_container()}
-            </Modalize>
-        </AuthContextList.Provider>
+      })
     );
+
+    setTaskList(filteredArr);
+  };
+
+  // Preenche o formulário para editar uma tarefa
+  const handleEdit = (itemToEdit: Task) => {
+    setTitle(itemToEdit.title);
+    setDescription(itemToEdit.description);
+    setSelectedFlag(itemToEdit.flag);
+    setItem(itemToEdit.item);
+
+    const timeLimit = new Date(itemToEdit.timeLimit);
+    setSelectedDate(timeLimit);
+    setSelectedTime(timeLimit);
+
+    onOpen();
+  };
+
+  // Exclui tarefa do Firestore
+  const handleDelete = async (itemToDelete: Task) => {
+    if (!userId) return;
+    try {
+      setLoading(true);
+      const itemQuery = query(
+        collection(db, "tasks"),
+        where("userId", "==", userId),
+        where("item", "==", itemToDelete.item)
+      );
+      const snapshot = await getDocs(itemQuery);
+
+      if (!snapshot.empty) {
+        const docRef = snapshot.docs[0].ref;
+        await deleteDoc(docRef);
+      }
+
+      await get_taskList(userId);
+    } catch (error) {
+      console.error("Erro ao excluir item no Firestore:", error);
+      alert("Erro ao excluir tarefa. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // (Removido bloco duplicado e inválido que usava 'uid' não definido)
+
+  // Reseta formulário para criação
+  const resetForm = () => {
+    setTitle("");
+    setDescription("");
+    setSelectedFlag("urgente");
+    setItem(0);
+    setSelectedDate(new Date());
+    setSelectedTime(new Date());
+  };
+
+  // Renderiza as flags para seleção
+  const _renderFlags = () =>
+    flags.map((flagItem, index) => (
+      <TouchableOpacity
+        key={index}
+        onPress={() => setSelectedFlag(flagItem.caption)}
+        style={{ marginRight: 10 }}
+      >
+        <Flag
+          caption={flagItem.caption}
+          color={flagItem.color}
+          selected={flagItem.caption === selectedFlag}
+        />
+      </TouchableOpacity>
+    ));
+
+  // Conteúdo do modal para criar/editar tarefa
+  const _container = () => (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 40 : 0}
+    >
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onClose}>
+            <MaterialIcons name="close" size={30} />
+          </TouchableOpacity>
+          <Text style={styles.title}>
+            {item !== 0 ? "Editar tarefa" : "Criar tarefa"}
+          </Text>
+          <TouchableOpacity onPress={handleSave}>
+            <AntDesign name="check" size={30} />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.content}>
+          <Input
+            Title="Título:"
+            labelStyle={styles.label}
+            value={title}
+            onChangeText={setTitle}
+          />
+          <Input
+            Title="Descrição:"
+            numberOfLines={5}
+            height={100}
+            multiline
+            labelStyle={styles.label}
+            textAlignVertical="top"
+            value={description}
+            onChangeText={setDescription}
+          />
+          <View style={styles.dateTimeContainer}>
+            <TouchableOpacity
+              onPress={() => setShowDatePicker(true)}
+              style={styles.dateInput}
+            >
+              <Input
+                Title="Data limite:"
+                labelStyle={styles.label}
+                editable={false}
+                value={selectedDate.toLocaleDateString()}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setShowTimePicker(true)}
+              style={styles.timeInput}
+            >
+              <Input
+                Title="Hora limite:"
+                labelStyle={styles.label}
+                editable={false}
+                value={selectedTime.toLocaleTimeString()}
+              />
+            </TouchableOpacity>
+          </View>
+
+          <CustomDateTimePicker
+            type="date"
+            onDateChange={handleDateChange}
+            show={showDatePicker}
+            setShow={setShowDatePicker}
+          />
+          <CustomDateTimePicker
+            type="time"
+            onDateChange={handleTimeChange}
+            show={showTimePicker}
+            setShow={setShowTimePicker}
+          />
+
+          <View style={styles.flags}>{_renderFlags()}</View>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+
+  return (
+    <AuthContextList.Provider
+      value={{
+        onOpen,
+        taskList,
+        handleEdit,
+        handleDelete,
+        taskListBackup,
+        filter,
+      }}
+    >
+      {children}
+      <Modalize
+        ref={modalizeRef}
+        snapPoint={600}
+        keyboardAvoidingBehavior="padding"
+      >
+        {_container()}
+      </Modalize>
+      {loading && <Loading loading={loading} />}
+    </AuthContextList.Provider>
+  );
 };
 
-export const styles = StyleSheet.create({
-    container: {
-        width: '100%',
-    },
-    header: {
-        width: '100%',
-        height: 40,
-        paddingHorizontal: 40,
-        flexDirection: 'row',
-        marginTop: 20,
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    title: {
-        fontSize: 20,
-        fontWeight: 'bold'
-    },
-    content: {
-        width: '100%',
-        paddingHorizontal: 20
-    },
-    label: {
-        fontWeight: 'bold',
-        color: '#000'
-    },
-    containerFlag: {
-        width: '100%',
-        padding: 10
-    },
-    flag: {
-        fontSize: 14,
-        fontWeight: 'bold'
-    }
+// Hook para consumir contexto com segurança
+export const useAuthList = () => {
+  const context = useContext(AuthContextList);
+  if (!context) {
+    throw new Error("useAuthList must be used within an AuthProviderList");
+  }
+  return context;
+};
+
+// Estilos atualizados
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 15,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+    marginTop: 10,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: "bold",
+  },
+  content: {
+    paddingHorizontal: 15,
+    flex: 1,
+  },
+  label: {
+    fontWeight: "bold",
+    marginBottom: 5,
+  },
+  dateTimeContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  dateInput: {
+    flex: 1,
+    marginRight: 10,
+  },
+  timeInput: {
+    flex: 1,
+  },
+  flags: {
+    marginTop: 20,
+    flexDirection: "row",
+  },
 });
-
-
-export const useAuth = () => useContext(AuthContextList);

@@ -12,8 +12,18 @@ import { themes } from "../../global/themes";
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { AuthContextList } from "../../context/authContext_list";
 
-export default ({ state, navigation }: BottomTabBarProps) => {
-  const { onOpen } = useContext<any>(AuthContextList);
+interface AuthContextListType {
+  onOpen: () => void;
+}
+
+export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
+  const context = useContext(AuthContextList);
+
+  if (!context || !context.onOpen) {
+    throw new Error("AuthContextList is not available or missing onOpen");
+  }
+
+  const { onOpen } = context;
 
   const go = (screenName: string) => {
     navigation.navigate(screenName);
@@ -21,34 +31,49 @@ export default ({ state, navigation }: BottomTabBarProps) => {
 
   return (
     <View style={style.tabArea}>
-      <TouchableOpacity style={style.tabItem} onPress={() => go("List")}>
+      <TouchableOpacity
+        style={style.tabItem}
+        onPress={() => go("List")}
+        accessibilityRole="button"
+        accessibilityLabel="Ir para lista"
+      >
         <AntDesign
           name="bars"
-          style={{ opacity: state.index === 0 ? 1 : 0.3, color: themes.Colors.primary, fontSize: 32 }}
+          style={[
+            style.icon,
+            { opacity: state.index === 0 ? 1 : 0.3, color: themes.Colors.primary }
+          ]}
         />
       </TouchableOpacity>
-      <TouchableOpacity style={style.tabItemButton} onPress={() => onOpen()}>
-        <View style={{ width: '100%', left: 10, top: 4 }}>
-          <Entypo
-            name="plus"
-            size={40}
-            color={"#FFF"}
-          />
+
+      <TouchableOpacity
+        style={style.tabItemButton}
+        onPress={() => onOpen()}
+        accessibilityRole="button"
+        accessibilityLabel="Abrir ação principal"
+      >
+        <View style={style.plusIconWrapper}>
+          <Entypo name="plus" size={40} color="#FFF" />
         </View>
-        <View style={{ flexDirection: 'row-reverse', width: '100%', right: 10, bottom: 10 }}>
-          <MaterialIcons
-            name="edit"
-            color={"#FFF"}
-            size={30}
-          />
+        <View style={style.editIconWrapper}>
+          <MaterialIcons name="edit" color="#FFF" size={30} />
         </View>
       </TouchableOpacity>
-      <TouchableOpacity style={style.tabItem} onPress={() => go("User")}>
+
+      <TouchableOpacity
+        style={style.tabItem}
+        onPress={() => go("User")}
+        accessibilityRole="button"
+        accessibilityLabel="Ir para perfil do usuário"
+      >
         <FontAwesome
           name="user"
-          style={{ opacity: state.index === 1 ? 1 : 0.3, color: themes.Colors.primary, fontSize: 32 }}
+          style={[
+            style.icon,
+            { opacity: state.index === 1 ? 1 : 0.3, color: themes.Colors.primary }
+          ]}
         />
       </TouchableOpacity>
     </View>
   );
-};
+}
